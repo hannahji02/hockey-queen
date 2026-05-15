@@ -1,0 +1,68 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --font-display: "Bebas Neue", "Impact", sans-serif;
+  --font-body: "Pretendard", "Noto Sans KR", sans-serif;
+}
+
+html,
+body {
+  height: 100%;
+  background-color: #0a0e1a;
+  color: #e5e7eb;
+  font-family: var(--font-body);
+  -webkit-font-smoothing: antialiased;
+}
+
+body {
+  background-image:
+    radial-gradient(at 20% 10%, rgba(34, 211, 238, 0.08) 0px, transparent 50%),
+    radial-gradient(at 80% 90%, rgba(232, 121, 249, 0.06) 0px, transparent 50%),
+    linear-gradient(180deg, #0a0e1a 0%, #050810 100%);
+  background-attachment: fixed;
+}
+
+/* 아이스링크 라인 패턴 */
+.rink-pattern {
+  background-image:
+    linear-gradient(to bottom, transparent 0%, rgba(34, 211, 238, 0.02) 50%, transparent 100%),
+    repeating-linear-gradient(
+      0deg,
+      transparent,
+      transparent 40px,
+      rgba(125, 211, 252, 0.03) 40px,
+      rgba(125, 211, 252, 0.03) 41px
+    );
+}
+
+/* 스크롤바 커스텀 */
+::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+::-webkit-scrollbar-track {
+  background: #0a0e1a;
+}
+
+::-webkit-scrollbar-thumb {
+  background: #1f2937;
+  border-radius: 4px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: #374151;
+}
+
+/* 체크박스 커스텀 */
+input[type="checkbox"] {
+  accent-color: #22d3ee;
+  cursor: pointer;
+}
+
+input[type="radio"] {
+  accent-color: #22d3ee;
+  cursor: pointer;
+}
