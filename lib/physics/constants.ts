@@ -3,29 +3,38 @@
  */
 
 // 캔버스 기준 크기 (실제는 비율 기반으로 동적 스케일)
+// 가로 720, 세로 2400 - 트랙이 매우 김
 export const STAGE = {
-  WIDTH: 540,
-  HEIGHT: 960, // 9:16 세로형
+  WIDTH: 720,
+  HEIGHT: 2400,
+  ASPECT_RATIO: 720 / 2400,
+} as const;
+
+// 카메라 뷰포트 크기 (퍽 추적 시 보이는 영역)
+// 16:9 비율로 화면 가로 풀필을 가정한 뷰포트
+export const VIEWPORT = {
+  WIDTH: 720,
+  HEIGHT: 405, // 16:9
 } as const;
 
 // 퍽 크기/물리 속성
 export const PUCK = {
-  RADIUS: 22,
-  RESTITUTION: 0.55, // 반발력 (얼음 위 미끄러짐)
-  FRICTION: 0.005, // 표면 마찰
-  FRICTION_AIR: 0.012, // 공기 저항 (낙하 속도 제어)
+  RADIUS: 26, // 카메라 줌 시 잘 보이도록 약간 키움
+  RESTITUTION: 0.55,
+  FRICTION: 0.005,
+  FRICTION_AIR: 0.012,
   DENSITY: 0.002,
 } as const;
 
 // 시작 위치 (상단)
 export const SPAWN = {
-  TOP_Y: 60,
-  MARGIN_X: 50,
-  JITTER: 8, // 미세 랜덤 오프셋
+  TOP_Y: 80,
+  MARGIN_X: 70,
+  JITTER: 10,
 } as const;
 
 // 결승선 위치 (하단)
-export const GOAL_LINE_Y = STAGE.HEIGHT - 60;
+export const GOAL_LINE_Y = STAGE.HEIGHT - 80;
 
 // 네온 컬러 팔레트 (퍽 이름 색상)
 export const NEON_COLORS = [

@@ -109,19 +109,14 @@ export function drawPuckLabels(
     ctx.translate(position.x * scale, position.y * scale);
     ctx.rotate(angle);
 
-    // 퍽 위 글로우 효과
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 8;
-
     // 이름 텍스트 폰트 설정
-    ctx.font = `bold ${
-      PUCK.RADIUS * 0.7 * scale
-    }px "Black Han Sans", "Noto Sans KR", sans-serif`;
+    const fontSize = PUCK.RADIUS * 0.75 * scale;
+    ctx.font = `900 ${fontSize}px "Black Han Sans", "Noto Sans KR", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
 
-    // 검은 외곽선 (가독성 향상)
-    ctx.lineWidth = PUCK.RADIUS * 0.12 * scale;
+    // 검은 외곽선 강화 (가독성 핵심)
+    ctx.lineWidth = PUCK.RADIUS * 0.22 * scale;
     ctx.lineJoin = "round";
     ctx.miterLimit = 2;
     ctx.strokeStyle = "#000000";
@@ -129,9 +124,11 @@ export function drawPuckLabels(
     ctx.shadowBlur = 0;
     ctx.strokeText(name, 0, 1);
 
-    // 컬러 채움 + 글로우
-    ctx.shadowColor = color;
-    ctx.shadowBlur = 8;
+    // 추가 두 번째 검은 외곽선 (덮어 그려서 더 진하게)
+    ctx.lineWidth = PUCK.RADIUS * 0.14 * scale;
+    ctx.strokeText(name, 0, 1);
+
+    // 컬러 채움 (글로우 없음)
     ctx.fillStyle = color;
     ctx.fillText(name, 0, 1);
 
