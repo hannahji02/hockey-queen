@@ -36,20 +36,26 @@ export const SPAWN = {
 // 결승선 위치 (하단)
 export const GOAL_LINE_Y = STAGE.HEIGHT - 80;
 
-// 네온 컬러 팔레트 (퍽 이름 색상)
+// 카메라 줌인 임계 거리 (결승선까지 남은 거리)
+// 이 거리 이하로 들어오면 줌인 + 슬로우모션 시작
+export const ZOOM_THRESHOLD = 700;
+export const MAX_ZOOM = 3;
+export const MIN_TIME_SCALE = 0.3;
+
+// 네온 컬러 팔레트 (퍽 이름 색상) - 흰 배경에서도 잘 보이도록 진한 색 위주
 export const NEON_COLORS = [
-  "#22d3ee", // cyan
-  "#e879f9", // magenta
-  "#fde047", // yellow
-  "#4ade80", // green
-  "#f87171", // red
-  "#a78bfa", // violet
-  "#fb923c", // orange
-  "#34d399", // emerald
-  "#f472b6", // pink
-  "#60a5fa", // blue
-  "#fbbf24", // amber
-  "#2dd4bf", // teal
+  "#0891b2", // cyan-dark
+  "#c026d3", // magenta-dark
+  "#ca8a04", // yellow-dark
+  "#16a34a", // green-dark
+  "#dc2626", // red-dark
+  "#7c3aed", // violet-dark
+  "#ea580c", // orange-dark
+  "#0d9488", // teal-dark
+  "#db2777", // pink-dark
+  "#2563eb", // blue-dark
+  "#d97706", // amber-dark
+  "#0e7490", // teal-darker
 ] as const;
 
 /**

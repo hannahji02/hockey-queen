@@ -1,95 +1,110 @@
 /**
- * 카메라 추적 시스템
+ * 카메라 추적 시스템 (v2)
  *
- * - 1등과 2등 퍽의 중심점을 따라감 (mode에 따라 선두/꼴찌)
- * - lerp 스무딩으로 부드러운 이동
- * - 화면 밖으로 카메라가 나가지 않도록 클램프
+ * - 1등+2등 중간점 추적 (lerp 스무딩)
+ * - 결승선 잔여 거리 < ZOOM_THRESHOLD 진입 시 줌인 (1배 → 3배)
+ * - 동시에 슬로우모션 트리거용 진행률 반환
+ * - 카메라가 스테이지 밖으로 나가지 않도록 클램프
  */
 
 import type { PuckBody } from "./puck";
-import { STAGE, VIEWPORT } from "./constants";
+import {
+  STAGE,
+  VIEWPORT,
+  GOAL_LINE_Y,
+  ZOOM_THRESHOLD,
+  MAX_ZOOM,
+  MIN_TIME_SCALE,
+} from "./constants";
 
 export interface Camera {
-  /** 카메라 중심 좌표 (스테이지 좌표계) */
+  /** 카메라 중심 좌표 (월드) */
   x: number;
   y: number;
+  /** 현재 줌 배율 (1=기본, MAX_ZOOM=최대 확대) */
+  zoom: number;
   /** 추적 모드 */
   mode: "first" | "last";
+  /** 현재 슬로우모션 비율 (1=정상, MIN_TIME_SCALE=최대 슬로우) */
+  timeScale: number;
 }
 
 export function createCamera(mode: "first" | "last"): Camera {
   return {
     x: STAGE.WIDTH / 2,
-    // 초기 위치: 출발 지점 약간 아래
     y: VIEWPORT.HEIGHT / 2,
+    zoom: 1,
     mode,
+    timeScale: 1,
   };
 }
 
 /**
- * 매 프레임 호출. 추적 대상의 중심점을 lerp로 따라감.
- *
- * 대상 결정:
- * - first 모드: 가장 아래 두 퍽의 중심점 (1,2등)
- * - last 모드: 가장 위 두 퍽의 중심점 (꼴등, 꼴등 직전)
- *
- * 단, 모든 퍽이 골인존에 가까이 모이면 중앙 결승선 추적으로 전환.
+ * 프레임 단위 lerp 보간 (레퍼런스 방식)
+ * 매 프레임 1/10씩 따라옴 → 부드러우면서도 응답성 좋음
  */
-export function updateCamera(
-  camera: Camera,
-  pucks: PuckBody[],
-  deltaSec: number
-): void {
+function lerpFrame(current: number, target: number, factor: number = 10): number {
+  const diff = target - current;
+  if (Math.abs(diff) < 0.5) return target;
+  return current + diff / factor;
+}
+
+/**
+ * 매 프레임 호출. 카메라 위치, 줌, 타임스케일을 갱신.
+ *
+ * 추적 대상:
+ * - first 모드: 가장 아래 두 퍽 중심점 (1, 2등)
+ * - last 모드: 가장 위 두 퍽 중심점 (꼴등, 꼴등 직전)
+ *
+ * 줌인 조건:
+ * - 추적 대상의 결승선 잔여 거리가 ZOOM_THRESHOLD 이하일 때
+ * - 거리가 가까울수록 줌 더 큼, 시간 더 느림
+ */
+export function updateCamera(camera: Camera, pucks: PuckBody[]): void {
   if (pucks.length === 0) return;
 
-  // 활성 퍽만 (골인된 퍽은 메타데이터로 표시될 예정, 일단은 전체)
   const activePucks = pucks.filter((p) => p.puckMeta);
-
   if (activePucks.length === 0) return;
 
-  // Y 좌표로 정렬
   const sorted = [...activePucks].sort((a, b) => b.position.y - a.position.y);
 
-  // 추적 대상 2개 선정
   let target1: PuckBody;
   let target2: PuckBody;
 
   if (camera.mode === "first") {
-    // 가장 아래에 있는 2개 (1, 2등)
     target1 = sorted[0];
     target2 = sorted[1] ?? sorted[0];
   } else {
-    // 가장 위에 있는 2개 (꼴등, 꼴등 직전)
     target1 = sorted[sorted.length - 1];
     target2 = sorted[sorted.length - 2] ?? target1;
   }
 
-  // 중심점 계산
   const targetX = (target1.position.x + target2.position.x) / 2;
   const targetY = (target1.position.y + target2.position.y) / 2;
 
-  // lerp 스무딩 (값이 클수록 빠르게 따라옴)
-  const lerpFactor = Math.min(1, deltaSec * 4);
-  camera.x += (targetX - camera.x) * lerpFactor;
-  camera.y += (targetY - camera.y) * lerpFactor;
+  // 결승선까지 잔여 거리 (선두 기준)
+  const leadPuck = camera.mode === "first" ? target1 : target1;
+  const goalDist = Math.abs(GOAL_LINE_Y - leadPuck.position.y);
 
-  // 카메라 영역이 스테이지 밖으로 나가지 않도록 클램프
-  const halfW = VIEWPORT.WIDTH / 2;
-  const halfH = VIEWPORT.HEIGHT / 2;
-  camera.x = Math.max(halfW, Math.min(STAGE.WIDTH - halfW, camera.x));
-  camera.y = Math.max(halfH, Math.min(STAGE.HEIGHT - halfH, camera.y));
-}
+  // 줌 + 타임스케일 계산
+  let targetZoom = 1;
+  let targetTimeScale = 1;
 
-/**
- * 스테이지 좌표를 카메라 기준 뷰포트 좌표로 변환
- */
-export function worldToView(
-  camera: Camera,
-  worldX: number,
-  worldY: number
-): { x: number; y: number } {
-  return {
-    x: worldX - (camera.x - VIEWPORT.WIDTH / 2),
-    y: worldY - (camera.y - VIEWPORT.HEIGHT / 2),
-  };
+  if (goalDist < ZOOM_THRESHOLD) {
+    const proximity = 1 - goalDist / ZOOM_THRESHOLD; // 0~1
+    targetZoom = 1 + proximity * (MAX_ZOOM - 1);
+    targetTimeScale = Math.max(MIN_TIME_SCALE, 1 - proximity * (1 - MIN_TIME_SCALE));
+  }
+
+  // 보간 적용
+  camera.x = lerpFrame(camera.x, targetX);
+  camera.y = lerpFrame(camera.y, targetY);
+  camera.zoom = lerpFrame(camera.zoom, targetZoom);
+  camera.timeScale = lerpFrame(camera.timeScale, targetTimeScale, 5);
+
+  // 카메라가 줌인되면 보이는 영역이 작아지므로, 클램프 영역도 줌에 따라 조정
+  const visibleHalfW = VIEWPORT.WIDTH / 2 / camera.zoom;
+  const visibleHalfH = VIEWPORT.HEIGHT / 2 / camera.zoom;
+  camera.x = Math.max(visibleHalfW, Math.min(STAGE.WIDTH - visibleHalfW, camera.x));
+  camera.y = Math.max(visibleHalfH, Math.min(STAGE.HEIGHT - visibleHalfH, camera.y));
 }
