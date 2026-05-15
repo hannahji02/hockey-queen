@@ -1,7 +1,10 @@
 "use client";
 
+/**
+ * 우측 순위 패널 (셋업 화면용)
+ * - Phase 5에서 실시간 순위 데이터 연동 예정
+ */
 export default function RankingPanel() {
-  // Phase 1: 정적 골격. Phase 5에서 실시간 순위 로직 연결.
   return (
     <div className="flex h-full flex-col">
       <div className="border-b border-rink-border p-4">

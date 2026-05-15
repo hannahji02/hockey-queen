@@ -1,48 +1,28 @@
 "use client";
 
-import { useState, useMemo, KeyboardEvent } from "react";
-import { HIDDEN_RANK_ADJUSTED } from "@/lib/roulette/excluded";
-
-/**
- * Phase 2: 참가자 관리 인터랙티브 활성화.
- *
- * 기능:
- * - 디폴트 15명 표시 (2열 그리드)
- * - 체크박스 토글 (디폴트 전원 ON)
- * - 이름 추가 (한글 1~3자, 중복 차단, 최대 30명)
- * - 이름 제거 (hover ✕ 버튼)
- * - 모드 선택 (1등/꼴등, 디폴트 꼴등)
- *
- * 셔플/시작은 Phase 3에서 활성화.
- */
-
-const DEFAULT_PARTICIPANTS = [
-  "강다연",
-  "강소현",
-  "김동현",
-  "김석현",
-  "김예은",
-  "문인화",
-  "안지용",
-  "유광현",
-  "이다연",
-  "이태경",
-  "장병주",
-  "조우제",
-  "지혜은",
-  "최정학",
-  "최준성",
-];
+import {
+  useState,
+  useMemo,
+  KeyboardEvent,
+  Dispatch,
+  SetStateAction,
+} from "react";
 
 const MAX_PARTICIPANTS = 30;
-
-// 한글 1~3자만 허용 (자모 단독 입력 차단을 위해 완성형 한글만)
 const KOREAN_NAME_REGEX = /^[\uAC00-\uD7A3]{1,3}$/;
 
 export interface Participant {
   id: string;
   name: string;
   checked: boolean;
+}
+
+interface Props {
+  participants: Participant[];
+  setParticipants: Dispatch<SetStateAction<Participant[]>>;
+  mode: "first" | "last";
+  setMode: Dispatch<SetStateAction<"first" | "last">>;
+  onStart: () => void;
 }
 
 function makeParticipant(name: string): Participant {
@@ -53,14 +33,16 @@ function makeParticipant(name: string): Participant {
   };
 }
 
-export default function ParticipantPanel() {
-  const [participants, setParticipants] = useState<Participant[]>(() =>
-    DEFAULT_PARTICIPANTS.map(makeParticipant)
-  );
+export default function ParticipantPanel({
+  participants,
+  setParticipants,
+  mode,
+  setMode,
+  onStart,
+}: Props) {
   const [inputValue, setInputValue] = useState("");
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
   const [shake, setShake] = useState(false);
-  const [mode, setMode] = useState<"first" | "last">("last");
 
   const checkedCount = useMemo(
     () => participants.filter((p) => p.checked).length,
@@ -69,7 +51,6 @@ export default function ParticipantPanel() {
 
   const isMaxReached = participants.length >= MAX_PARTICIPANTS;
 
-  // 에러 표시 + 흔들림 애니메이션 트리거
   const triggerError = (msg: string) => {
     setErrorMsg(msg);
     setShake(true);
@@ -89,26 +70,12 @@ export default function ParticipantPanel() {
 
   const handleAdd = () => {
     const trimmed = inputValue.trim();
-
-    if (!trimmed) {
-      triggerError("이름을 입력하세요");
-      return;
-    }
-
-    if (!KOREAN_NAME_REGEX.test(trimmed)) {
-      triggerError("한글 1~3자만 가능");
-      return;
-    }
-
-    if (participants.some((p) => p.name === trimmed)) {
-      triggerError("이미 존재하는 이름");
-      return;
-    }
-
-    if (isMaxReached) {
-      triggerError(`최대 ${MAX_PARTICIPANTS}명까지`);
-      return;
-    }
+    if (!trimmed) return triggerError("이름을 입력하세요");
+    if (!KOREAN_NAME_REGEX.test(trimmed))
+      return triggerError("한글 1~3자만 가능");
+    if (participants.some((p) => p.name === trimmed))
+      return triggerError("이미 존재하는 이름");
+    if (isMaxReached) return triggerError(`최대 ${MAX_PARTICIPANTS}명까지`);
 
     setParticipants((prev) => [...prev, makeParticipant(trimmed)]);
     setInputValue("");
@@ -122,20 +89,13 @@ export default function ParticipantPanel() {
     }
   };
 
-  // 입력 검증: 입력 중에는 한글만 통과시키되 표시 자체는 막지 않음 (조합 중인 한글 고려)
   const handleInputChange = (value: string) => {
-    // 3자 초과는 잘라냄
-    if (value.length > 3) {
-      setInputValue(value.slice(0, 3));
-    } else {
-      setInputValue(value);
-    }
+    setInputValue(value.length > 3 ? value.slice(0, 3) : value);
     if (errorMsg) setErrorMsg(null);
   };
 
   return (
     <div className="flex h-full flex-col">
-      {/* 참가자 리스트 */}
       <div className="flex-1 overflow-y-auto p-4">
         <div className="mb-3 flex items-center justify-between">
           <label className="text-[10px] font-bold uppercase tracking-widest text-gray-500">
@@ -151,7 +111,6 @@ export default function ParticipantPanel() {
           </span>
         </div>
 
-        {/* 2열 그리드 */}
         <ul className="grid grid-cols-2 gap-x-2 gap-y-1">
           {participants.map((p) => (
             <li
@@ -184,39 +143,31 @@ export default function ParticipantPanel() {
           ))}
         </ul>
 
-        {/* 참가자 추가 input */}
         <div className="mt-4">
-          <div
-            className={`flex gap-1 ${shake ? "animate-shake" : ""}`}
-            style={
-              shake
-                ? {
-                    animation: "shake 0.4s cubic-bezier(.36,.07,.19,.97) both",
-                  }
-                : undefined
-            }
-          >
-            <input
-              type="text"
-              value={inputValue}
-              onChange={(e) => handleInputChange(e.target.value)}
-              onKeyDown={handleKeyDown}
-              placeholder="이름 추가 (한글 3자)"
-              maxLength={3}
-              disabled={isMaxReached}
-              className={`flex-1 rounded-md border bg-rink-surface/40 px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-600 transition focus:outline-none focus:ring-1 disabled:cursor-not-allowed disabled:opacity-50 ${
-                errorMsg
-                  ? "border-neon-red focus:ring-neon-red"
-                  : "border-rink-line focus:border-neon-cyan/50 focus:ring-neon-cyan/50"
-              }`}
-            />
-            <button
-              onClick={handleAdd}
-              disabled={isMaxReached || !inputValue.trim()}
-              className="rounded-md border border-rink-line bg-rink-surface/40 px-3 py-1.5 text-xs text-gray-300 transition hover:border-neon-cyan/50 hover:text-neon-cyan disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-rink-line disabled:hover:text-gray-300"
-            >
-              +
-            </button>
+          <div className={shake ? "animate-shake" : ""}>
+            <div className="flex gap-1">
+              <input
+                type="text"
+                value={inputValue}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={handleKeyDown}
+                placeholder="이름 추가 (한글 3자)"
+                maxLength={3}
+                disabled={isMaxReached}
+                className={`flex-1 rounded-md border bg-rink-surface/40 px-2 py-1.5 text-xs text-gray-200 placeholder:text-gray-600 transition focus:outline-none focus:ring-1 disabled:cursor-not-allowed disabled:opacity-50 ${
+                  errorMsg
+                    ? "border-neon-red focus:ring-neon-red"
+                    : "border-rink-line focus:border-neon-cyan/50 focus:ring-neon-cyan/50"
+                }`}
+              />
+              <button
+                onClick={handleAdd}
+                disabled={isMaxReached || !inputValue.trim()}
+                className="rounded-md border border-rink-line bg-rink-surface/40 px-3 py-1.5 text-xs text-gray-300 transition hover:border-neon-cyan/50 hover:text-neon-cyan disabled:cursor-not-allowed disabled:opacity-40 disabled:hover:border-rink-line disabled:hover:text-gray-300"
+              >
+                +
+              </button>
+            </div>
           </div>
           {errorMsg && (
             <p className="mt-1.5 text-[10px] text-neon-red">⚠ {errorMsg}</p>
@@ -224,7 +175,6 @@ export default function ParticipantPanel() {
         </div>
       </div>
 
-      {/* 모드 선택 */}
       <div className="border-t border-rink-border p-4">
         <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-500">
           당첨 모드
@@ -267,24 +217,22 @@ export default function ParticipantPanel() {
         </div>
       </div>
 
-      {/* 버튼 영역 (Phase 3에서 활성화) */}
-      <div className="space-y-2 border-t border-rink-border p-4">
+      <div className="border-t border-rink-border p-4">
         <button
-          disabled
-          className="w-full cursor-not-allowed rounded-md border border-rink-line bg-rink-surface px-4 py-2 text-xs font-medium text-gray-400 transition hover:border-neon-magenta/50 hover:text-neon-magenta"
+          onClick={onStart}
+          disabled={checkedCount < 2}
+          className="w-full rounded-md bg-gradient-to-r from-neon-cyan to-neon-magenta px-4 py-3 text-base font-bold text-rink-bg shadow-lg shadow-neon-cyan/20 transition hover:shadow-neon-magenta/30 disabled:cursor-not-allowed disabled:opacity-40"
+          style={{ fontFamily: "Bebas Neue, sans-serif", letterSpacing: "0.15em" }}
         >
-          🎲 셔플 (Phase 3)
+          🎲 ROULETTE START
         </button>
-        <button
-          disabled
-          className="w-full cursor-not-allowed rounded-md bg-gradient-to-r from-neon-cyan to-neon-magenta px-4 py-2.5 text-sm font-bold text-rink-bg opacity-60 shadow-lg transition hover:opacity-100"
-          style={{ fontFamily: "Bebas Neue, sans-serif", letterSpacing: "0.1em" }}
-        >
-          START
-        </button>
+        {checkedCount < 2 && (
+          <p className="mt-2 text-center text-[10px] text-gray-600">
+            최소 2명 이상 체크하세요
+          </p>
+        )}
       </div>
 
-      {/* 당첨 이력 (Phase 5에서 채움) */}
       <div className="border-t border-rink-border p-4">
         <label className="block text-[10px] font-bold uppercase tracking-widest text-gray-500">
           당첨 이력
@@ -294,5 +242,3 @@ export default function ParticipantPanel() {
     </div>
   );
 }
-
-export { HIDDEN_RANK_ADJUSTED };
