@@ -19,7 +19,7 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-4 text-xs text-gray-400">
-        <span>Phase 1 · UI Skeleton</span>
+        <span>Phase 2 · Participants Active</span>
         <div className="h-2 w-2 animate-pulse rounded-full bg-neon-green" />
       </div>
     </header>
