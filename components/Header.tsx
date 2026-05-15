@@ -19,7 +19,7 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-4 text-xs text-gray-400">
-        <span>Phase 4.6 · White Rink + Zoom</span>
+        <span>Phase 5A · planck.js Engine</span>
         <div className="h-2 w-2 animate-pulse rounded-full bg-neon-green" />
       </div>
     </header>

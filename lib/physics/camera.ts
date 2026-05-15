@@ -1,110 +1,127 @@
 /**
- * 카메라 추적 시스템 (v2)
+ * 카메라 시스템 (레퍼런스 방식 차용)
  *
- * - 1등+2등 중간점 추적 (lerp 스무딩)
- * - 결승선 잔여 거리 < ZOOM_THRESHOLD 진입 시 줌인 (1배 → 3배)
- * - 동시에 슬로우모션 트리거용 진행률 반환
- * - 카메라가 스테이지 밖으로 나가지 않도록 클램프
+ * - 평소: 줌 1배, 카메라 중심 = 스테이지 중앙 부근
+ * - 시뮬레이션 시작 후: 1등(또는 꼴등) 퍽 추적
+ * - 결승선 잔여 거리 < ZOOM_THRESHOLD 진입 시 줌 1배 → 4배 점진 확대
+ * - 프레임 lerp 보간 (current + (target - current) / 10)
  */
 
-import type { PuckBody } from "./puck";
-import {
-  STAGE,
-  VIEWPORT,
-  GOAL_LINE_Y,
-  ZOOM_THRESHOLD,
-  MAX_ZOOM,
-  MIN_TIME_SCALE,
-} from "./constants";
+import { ZOOM_THRESHOLD, STAGE, INITIAL_ZOOM } from "./constants";
+import type { Puck } from "./engine";
 
 export interface Camera {
-  /** 카메라 중심 좌표 (월드) */
   x: number;
   y: number;
-  /** 현재 줌 배율 (1=기본, MAX_ZOOM=최대 확대) */
   zoom: number;
-  /** 추적 모드 */
+  targetX: number;
+  targetY: number;
+  targetZoom: number;
   mode: "first" | "last";
-  /** 현재 슬로우모션 비율 (1=정상, MIN_TIME_SCALE=최대 슬로우) */
+  shouldFollow: boolean;
+  /** 슬로우모션 비율 (1=정상, 0.3=느림) */
   timeScale: number;
 }
 
 export function createCamera(mode: "first" | "last"): Camera {
   return {
-    x: STAGE.WIDTH / 2,
-    y: VIEWPORT.HEIGHT / 2,
+    x: 12.95,
+    y: 2,
     zoom: 1,
+    targetX: 12.95,
+    targetY: 2,
+    targetZoom: 1,
     mode,
+    shouldFollow: false,
     timeScale: 1,
   };
 }
 
-/**
- * 프레임 단위 lerp 보간 (레퍼런스 방식)
- * 매 프레임 1/10씩 따라옴 → 부드러우면서도 응답성 좋음
- */
-function lerpFrame(current: number, target: number, factor: number = 10): number {
-  const diff = target - current;
-  if (Math.abs(diff) < 0.5) return target;
-  return current + diff / factor;
+export function startFollowing(cam: Camera): void {
+  cam.shouldFollow = true;
 }
 
 /**
- * 매 프레임 호출. 카메라 위치, 줌, 타임스케일을 갱신.
+ * 프레임 lerp 보간 (레퍼런스 방식)
+ */
+function interp(current: number, target: number): number {
+  const d = target - current;
+  if (Math.abs(d) < 1 / INITIAL_ZOOM) {
+    return target;
+  }
+  return current + d / 10;
+}
+
+/**
+ * 카메라 업데이트 (매 프레임 호출)
  *
  * 추적 대상:
- * - first 모드: 가장 아래 두 퍽 중심점 (1, 2등)
- * - last 모드: 가장 위 두 퍽 중심점 (꼴등, 꼴등 직전)
- *
- * 줌인 조건:
- * - 추적 대상의 결승선 잔여 거리가 ZOOM_THRESHOLD 이하일 때
- * - 거리가 가까울수록 줌 더 큼, 시간 더 느림
+ * - first 모드: y가 가장 큰 퍽 (1등 = 가장 아래)
+ * - last 모드: y가 가장 작은 퍽 (꼴등 = 가장 위)
  */
-export function updateCamera(camera: Camera, pucks: PuckBody[]): void {
-  if (pucks.length === 0) return;
+export function updateCamera(cam: Camera, pucks: Puck[]): void {
+  if (cam.shouldFollow && pucks.length > 0) {
+    // 추적 대상 결정
+    let target: Puck;
+    if (cam.mode === "first") {
+      target = pucks.reduce((a, b) =>
+        a.body.getPosition().y > b.body.getPosition().y ? a : b
+      );
+    } else {
+      target = pucks.reduce((a, b) =>
+        a.body.getPosition().y < b.body.getPosition().y ? a : b
+      );
+    }
 
-  const activePucks = pucks.filter((p) => p.puckMeta);
-  if (activePucks.length === 0) return;
+    const pos = target.body.getPosition();
+    cam.targetX = pos.x;
+    cam.targetY = pos.y;
 
-  const sorted = [...activePucks].sort((a, b) => b.position.y - a.position.y);
-
-  let target1: PuckBody;
-  let target2: PuckBody;
-
-  if (camera.mode === "first") {
-    target1 = sorted[0];
-    target2 = sorted[1] ?? sorted[0];
-  } else {
-    target1 = sorted[sorted.length - 1];
-    target2 = sorted[sorted.length - 2] ?? target1;
-  }
-
-  const targetX = (target1.position.x + target2.position.x) / 2;
-  const targetY = (target1.position.y + target2.position.y) / 2;
-
-  // 결승선까지 잔여 거리 (선두 기준)
-  const leadPuck = camera.mode === "first" ? target1 : target1;
-  const goalDist = Math.abs(GOAL_LINE_Y - leadPuck.position.y);
-
-  // 줌 + 타임스케일 계산
-  let targetZoom = 1;
-  let targetTimeScale = 1;
-
-  if (goalDist < ZOOM_THRESHOLD) {
-    const proximity = 1 - goalDist / ZOOM_THRESHOLD; // 0~1
-    targetZoom = 1 + proximity * (MAX_ZOOM - 1);
-    targetTimeScale = Math.max(MIN_TIME_SCALE, 1 - proximity * (1 - MIN_TIME_SCALE));
+    // 줌 + 슬로우모션 계산
+    const goalDist = Math.abs(STAGE.ZOOM_Y - pos.y);
+    if (goalDist < ZOOM_THRESHOLD) {
+      const proximity = 1 - goalDist / ZOOM_THRESHOLD; // 0~1
+      cam.targetZoom = Math.max(1, 1 + proximity * 3); // 1 → 4
+      cam.timeScale = Math.max(0.25, 1 - proximity * 0.75); // 1 → 0.25
+    } else {
+      cam.targetZoom = 1;
+      cam.timeScale = 1;
+    }
   }
 
   // 보간 적용
-  camera.x = lerpFrame(camera.x, targetX);
-  camera.y = lerpFrame(camera.y, targetY);
-  camera.zoom = lerpFrame(camera.zoom, targetZoom);
-  camera.timeScale = lerpFrame(camera.timeScale, targetTimeScale, 5);
+  cam.x = interp(cam.x, cam.targetX);
+  cam.y = interp(cam.y, cam.targetY);
+  cam.zoom = interp(cam.zoom, cam.targetZoom);
+}
 
-  // 카메라가 줌인되면 보이는 영역이 작아지므로, 클램프 영역도 줌에 따라 조정
-  const visibleHalfW = VIEWPORT.WIDTH / 2 / camera.zoom;
-  const visibleHalfH = VIEWPORT.HEIGHT / 2 / camera.zoom;
-  camera.x = Math.max(visibleHalfW, Math.min(STAGE.WIDTH - visibleHalfW, camera.x));
-  camera.y = Math.max(visibleHalfH, Math.min(STAGE.HEIGHT - visibleHalfH, camera.y));
+/**
+ * 초기 카메라 위치 (시작 영역 중앙)
+ *
+ * 레퍼런스 방식: 시작 영역에 따라 카메라 중심과 줌 자동 계산
+ */
+export function initCameraPosition(cam: Camera, puckCount: number): void {
+  if (puckCount > 0) {
+    const cols = Math.min(puckCount, 10);
+    const rows = Math.ceil(puckCount / 10);
+    const lineDelta = -Math.max(0, Math.ceil(rows - 5));
+    const centerX = 10.25 + (cols - 1) * 0.3;
+    const centerY = (1 + rows) / 2 + lineDelta;
+
+    cam.x = centerX;
+    cam.y = centerY;
+    cam.targetX = centerX;
+    cam.targetY = centerY;
+    cam.zoom = 1.8;
+    cam.targetZoom = 1.8;
+  } else {
+    cam.x = 12.95;
+    cam.y = 2;
+    cam.targetX = 12.95;
+    cam.targetY = 2;
+    cam.zoom = 1;
+    cam.targetZoom = 1;
+  }
+  cam.shouldFollow = false;
+  cam.timeScale = 1;
 }

@@ -1,12 +1,24 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import Matter from "matter-js";
-import { createEngine, cleanupEngine } from "@/lib/physics/engine";
-import { createPucks, type PuckBody } from "@/lib/physics/puck";
-import { createObstacles, type ObstacleSet } from "@/lib/physics/obstacles";
-import { createCamera, updateCamera, type Camera } from "@/lib/physics/camera";
-import { STAGE, VIEWPORT, PUCK, GOAL_LINE_Y } from "@/lib/physics/constants";
+import * as planck from "planck";
+import {
+  createPhysicsWorld,
+  createPucks,
+  stepWorld,
+  startSimulation,
+  destroyWorld,
+  type PhysicsWorld,
+  type Puck,
+} from "@/lib/physics/engine";
+import {
+  createCamera,
+  updateCamera,
+  initCameraPosition,
+  startFollowing,
+  type Camera,
+} from "@/lib/physics/camera";
+import { STAGE, PUCK, INITIAL_ZOOM, VIEWPORT } from "@/lib/physics/constants";
 
 export type GameState = "idle" | "shuffling" | "running" | "finished";
 
@@ -29,15 +41,15 @@ export default function GameCanvas({
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const minimapCanvasRef = useRef<HTMLCanvasElement>(null);
 
-  const engineRef = useRef<Matter.Engine | null>(null);
-  const runnerRef = useRef<Matter.Runner | null>(null);
-  const pucksRef = useRef<PuckBody[]>([]);
-  const obstacleSetRef = useRef<ObstacleSet | null>(null);
+  const pwRef = useRef<PhysicsWorld | null>(null);
   const cameraRef = useRef<Camera | null>(null);
   const animationRef = useRef<number | null>(null);
+  const lastTimeRef = useRef<number>(0);
+  const elapsedRef = useRef<number>(0);
 
   const [displaySize, setDisplaySize] = useState({ w: 0, h: 0 });
 
+  // 컨테이너 크기에 맞춰 캔버스 표시 크기 결정 (16:9 유지)
   useEffect(() => {
     const updateSize = () => {
       if (!containerRef.current) return;
@@ -59,16 +71,14 @@ export default function GameCanvas({
     return () => window.removeEventListener("resize", updateSize);
   }, [fullscreen]);
 
+  // 게임 상태 변경 처리
   useEffect(() => {
     if (gameState === "idle") {
       teardown();
       return;
     }
 
-    if (
-      (gameState === "shuffling" || gameState === "running") &&
-      !engineRef.current
-    ) {
+    if ((gameState === "shuffling" || gameState === "running") && !pwRef.current) {
       setup();
     }
 
@@ -79,47 +89,26 @@ export default function GameCanvas({
       return () => clearTimeout(timer);
     }
 
-    if (gameState === "running" && engineRef.current) {
-      engineRef.current.gravity.scale = 0.0012;
+    if (gameState === "running" && pwRef.current && cameraRef.current) {
+      startSimulation(pwRef.current);
+      startFollowing(cameraRef.current);
     }
   }, [gameState]);
 
   const setup = () => {
     if (!canvasRef.current) return;
 
-    const engineSetup = createEngine();
-    engineRef.current = engineSetup.engine;
+    const pw = createPhysicsWorld();
+    pwRef.current = pw;
 
-    if (gameState === "shuffling") {
-      engineRef.current.gravity.scale = 0;
-    }
+    createPucks(pw, participants);
 
-    const pucks = createPucks(participants, true);
-    pucksRef.current = pucks;
-    Matter.Composite.add(engineSetup.world, pucks);
+    const cam = createCamera(mode);
+    cameraRef.current = cam;
+    initCameraPosition(cam, participants.length);
 
-    const obstacles = createObstacles();
-    obstacleSetRef.current = obstacles;
-    Matter.Composite.add(engineSetup.world, obstacles.bodies);
-
-    cameraRef.current = createCamera(mode);
-
-    const runner = Matter.Runner.create();
-    runnerRef.current = runner;
-    Matter.Runner.run(runner, engineSetup.engine);
-
-    if (gameState === "shuffling") {
-      const shakeInterval = setInterval(() => {
-        pucks.forEach((p) => {
-          Matter.Body.setVelocity(p, {
-            x: (Math.random() - 0.5) * 8,
-            y: (Math.random() - 0.5) * 2,
-          });
-        });
-      }, 150);
-      setTimeout(() => clearInterval(shakeInterval), 1100);
-    }
-
+    lastTimeRef.current = performance.now();
+    elapsedRef.current = 0;
     renderLoop();
   };
 
@@ -128,22 +117,24 @@ export default function GameCanvas({
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
+    if (!pwRef.current || !cameraRef.current) return;
 
     const now = performance.now();
+    const deltaMs = Math.min(50, now - lastTimeRef.current);
+    lastTimeRef.current = now;
 
-    if (obstacleSetRef.current) {
-      obstacleSetRef.current.update(now);
+    // 물리 step (10ms 고정 간격, 누적 시간만큼 진행)
+    elapsedRef.current += deltaMs;
+    const STEP_MS = 10;
+    while (elapsedRef.current >= STEP_MS) {
+      stepWorld(pwRef.current, STEP_MS / 1000, cameraRef.current.timeScale);
+      elapsedRef.current -= STEP_MS;
     }
 
-    if (cameraRef.current && pucksRef.current.length > 0) {
-      updateCamera(cameraRef.current, pucksRef.current);
+    // 카메라 업데이트
+    updateCamera(cameraRef.current, pwRef.current.pucks);
 
-      // 슬로우모션 적용
-      if (engineRef.current && gameState === "running") {
-        engineRef.current.timing.timeScale = cameraRef.current.timeScale;
-      }
-    }
-
+    // 렌더링
     renderScene(ctx);
     renderMinimap();
 
@@ -152,7 +143,7 @@ export default function GameCanvas({
 
   const renderScene = (ctx: CanvasRenderingContext2D) => {
     const canvas = canvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !cameraRef.current || !pwRef.current) return;
 
     const dpr = window.devicePixelRatio || 1;
     canvas.width = displaySize.w * dpr;
@@ -160,217 +151,208 @@ export default function GameCanvas({
     canvas.style.width = `${displaySize.w}px`;
     canvas.style.height = `${displaySize.h}px`;
 
-    if (!cameraRef.current) return;
     const cam = cameraRef.current;
+    const w = canvas.width;
+    const h = canvas.height;
 
-    // 카메라 줌 적용된 스케일
-    const baseScale = (displaySize.w / VIEWPORT.WIDTH) * dpr;
-    const scale = baseScale * cam.zoom;
-
-    // 카메라 변환 (줌 고려)
-    const visibleHalfW = VIEWPORT.WIDTH / 2 / cam.zoom;
-    const visibleHalfH = VIEWPORT.HEIGHT / 2 / cam.zoom;
-    const camOffsetX = cam.x - visibleHalfW;
-    const camOffsetY = cam.y - visibleHalfH;
-
-    const wx = (x: number) => (x - camOffsetX) * scale;
-    const wy = (y: number) => (y - camOffsetY) * scale;
-    const ws = (s: number) => s * scale;
-
-    // === 흰색 아이스링크 배경 ===
-    const bgGrad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-    bgGrad.addColorStop(0, "#f0f9ff"); // sky-50
-    bgGrad.addColorStop(0.5, "#e0f2fe"); // sky-100
-    bgGrad.addColorStop(1, "#bae6fd"); // sky-200
+    // 배경 (흰색 아이스링크)
+    const bgGrad = ctx.createLinearGradient(0, 0, 0, h);
+    bgGrad.addColorStop(0, "#f0f9ff");
+    bgGrad.addColorStop(0.5, "#e0f2fe");
+    bgGrad.addColorStop(1, "#bae6fd");
     ctx.fillStyle = bgGrad;
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.fillRect(0, 0, w, h);
 
-    // 빙판 표면 라인 (장식)
-    ctx.strokeStyle = "rgba(186, 230, 253, 0.6)";
-    ctx.lineWidth = 1 * baseScale;
-    for (let y = 200; y < STAGE.HEIGHT; y += 200) {
+    // ===== 카메라 변환 =====
+    // 레퍼런스 방식: 화면 중앙에 카메라가 오도록 translate, scale은 zoom
+    // worldX → pixelX: (worldX - cam.x) * zoomFactor + w/2
+    const zoomFactor = INITIAL_ZOOM * dpr * cam.zoom;
+
+    ctx.save();
+    ctx.translate(w / 2, h / 2);
+    ctx.scale(cam.zoom * dpr, cam.zoom * dpr);
+    ctx.translate(-cam.x * INITIAL_ZOOM, -cam.y * INITIAL_ZOOM);
+    ctx.scale(INITIAL_ZOOM, INITIAL_ZOOM);
+
+    // 이제 ctx는 월드 좌표계로 그릴 수 있음. (1단위 = 1m)
+    const lineScale = 1 / (cam.zoom * INITIAL_ZOOM * dpr);
+
+    // === 빙판 가로 라인 (장식) ===
+    ctx.strokeStyle = "rgba(125, 211, 252, 0.5)";
+    ctx.lineWidth = lineScale * 2;
+    for (let y = 0; y <= 120; y += 10) {
       ctx.beginPath();
-      ctx.moveTo(wx(0), wy(y));
-      ctx.lineTo(wx(STAGE.WIDTH), wy(y));
+      ctx.moveTo(0, y);
+      ctx.lineTo(30, y);
       ctx.stroke();
     }
 
-    // 좌우 보드 (빨간색 NHL 보드)
+    // === 결승선 (빨강) ===
     ctx.strokeStyle = "#dc2626";
-    ctx.lineWidth = 4 * baseScale;
+    ctx.lineWidth = lineScale * 4;
     ctx.beginPath();
-    ctx.moveTo(wx(0), wy(0));
-    ctx.lineTo(wx(0), wy(STAGE.HEIGHT));
-    ctx.moveTo(wx(STAGE.WIDTH), wy(0));
-    ctx.lineTo(wx(STAGE.WIDTH), wy(STAGE.HEIGHT));
+    ctx.moveTo(0, STAGE.GOAL_Y);
+    ctx.lineTo(30, STAGE.GOAL_Y);
     ctx.stroke();
 
-    // 상단 빨강 라인 (블루라인 컨셉)
-    ctx.strokeStyle = "#1e3a8a";
-    ctx.lineWidth = 3 * baseScale;
-    ctx.beginPath();
-    ctx.moveTo(wx(0), wy(0));
-    ctx.lineTo(wx(STAGE.WIDTH), wy(0));
-    ctx.stroke();
-
-    // 결승선 (빨강, 두께감)
-    ctx.strokeStyle = "#dc2626";
-    ctx.lineWidth = 5 * baseScale;
-    ctx.beginPath();
-    ctx.moveTo(wx(0), wy(GOAL_LINE_Y));
-    ctx.lineTo(wx(STAGE.WIDTH), wy(GOAL_LINE_Y));
-    ctx.stroke();
-
-    // 골존 (빨강 그라데이션)
-    const goalGrad = ctx.createLinearGradient(0, wy(GOAL_LINE_Y), 0, wy(STAGE.HEIGHT));
-    goalGrad.addColorStop(0, "rgba(220, 38, 38, 0.0)");
-    goalGrad.addColorStop(1, "rgba(220, 38, 38, 0.25)");
+    // === 골존 빨강 그라데이션 ===
+    const goalGrad = ctx.createLinearGradient(0, STAGE.ZOOM_Y, 0, STAGE.GOAL_Y);
+    goalGrad.addColorStop(0, "rgba(220, 38, 38, 0)");
+    goalGrad.addColorStop(1, "rgba(220, 38, 38, 0.2)");
     ctx.fillStyle = goalGrad;
-    ctx.fillRect(wx(0), wy(GOAL_LINE_Y), ws(STAGE.WIDTH), ws(STAGE.HEIGHT - GOAL_LINE_Y));
+    ctx.fillRect(0, STAGE.ZOOM_Y, 30, STAGE.GOAL_Y - STAGE.ZOOM_Y);
 
-    // 장애물 렌더링
-    if (obstacleSetRef.current) {
-      obstacleSetRef.current.bodies.forEach((body) => {
-        renderBody(ctx, body, wx, wy, ws, baseScale);
-      });
-    }
+    // === 장애물 렌더링 (월드 좌표계) ===
+    renderBodies(ctx, pwRef.current, lineScale);
 
-    // 퍽 렌더링
-    pucksRef.current.forEach((puck) => {
-      renderPuck(ctx, puck, wx, wy, ws, baseScale);
-    });
-  };
+    // === 퍽 렌더링 ===
+    renderPucks(ctx, pwRef.current.pucks, lineScale);
 
-  const renderBody = (
-    ctx: CanvasRenderingContext2D,
-    body: Matter.Body,
-    wx: (x: number) => number,
-    wy: (y: number) => number,
-    ws: (s: number) => number,
-    baseScale: number
-  ) => {
-    const render = body.render as Matter.IBodyRenderOptions & {
-      lineWidth?: number;
-    };
-    const strokeStyle = (render.strokeStyle as string) ?? "#1e293b";
-    const fillStyle = render.fillStyle ?? "transparent";
-    const lineWidth = (render.lineWidth ?? 1) * baseScale;
-
-    ctx.save();
-
-    if (body.circleRadius) {
-      ctx.beginPath();
-      ctx.arc(wx(body.position.x), wy(body.position.y), ws(body.circleRadius), 0, Math.PI * 2);
-      if (fillStyle !== "transparent") {
-        ctx.fillStyle = fillStyle as string;
-        ctx.fill();
-      }
-      if (strokeStyle !== "transparent") {
-        ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = lineWidth;
-        ctx.stroke();
-      }
-    } else {
-      const verts = body.vertices;
-      ctx.beginPath();
-      ctx.moveTo(wx(verts[0].x), wy(verts[0].y));
-      for (let i = 1; i < verts.length; i++) {
-        ctx.lineTo(wx(verts[i].x), wy(verts[i].y));
-      }
-      ctx.closePath();
-      if (fillStyle !== "transparent") {
-        ctx.fillStyle = fillStyle as string;
-        ctx.fill();
-      }
-      if (strokeStyle !== "transparent") {
-        ctx.strokeStyle = strokeStyle;
-        ctx.lineWidth = lineWidth;
-        ctx.stroke();
-      }
-    }
     ctx.restore();
   };
 
-  const renderPuck = (
+  const renderBodies = (
     ctx: CanvasRenderingContext2D,
-    puck: PuckBody,
-    wx: (x: number) => number,
-    wy: (y: number) => number,
-    ws: (s: number) => number,
-    baseScale: number
+    pw: PhysicsWorld,
+    lineScale: number
   ) => {
-    if (!puck.puckMeta) return;
-    const cx = wx(puck.position.x);
-    const cy = wy(puck.position.y);
-    const r = ws(PUCK.RADIUS);
+    // World iterate all bodies
+    for (let body = pw.world.getBodyList(); body; body = body.getNext()) {
+      const pos = body.getPosition();
+      const angle = body.getAngle();
+      const type = body.getType();
 
-    ctx.save();
-    ctx.translate(cx, cy);
-    ctx.rotate(puck.angle);
+      // dynamic body는 퍽이므로 별도 렌더링
+      if (type === "dynamic") continue;
 
-    // 그림자 (흰 배경에서 더 강함)
-    ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
-    ctx.shadowBlur = 12 * baseScale;
-    ctx.shadowOffsetY = 4 * baseScale;
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.rotate(angle);
 
-    // 검은 입체 퍽 본체
-    const puckGrad = ctx.createRadialGradient(
-      -r * 0.3,
-      -r * 0.3,
-      r * 0.1,
-      0,
-      0,
-      r
-    );
-    puckGrad.addColorStop(0, "#404040");
-    puckGrad.addColorStop(0.5, "#1a1a1a");
-    puckGrad.addColorStop(1, "#000000");
-    ctx.fillStyle = puckGrad;
-    ctx.beginPath();
-    ctx.arc(0, 0, r, 0, Math.PI * 2);
-    ctx.fill();
+      // 모든 fixture 순회
+      for (let fixture = body.getFixtureList(); fixture; fixture = fixture.getNext()) {
+        const shape = fixture.getShape();
+        const shapeType = shape.getType();
 
-    ctx.shadowColor = "transparent";
-    ctx.shadowBlur = 0;
-    ctx.shadowOffsetY = 0;
+        if (shapeType === "polygon") {
+          const polygon = shape as planck.PolygonShape;
+          const vertices = polygon.m_vertices;
 
-    // 측면 두께감 링 (밝은 색)
-    ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
-    ctx.lineWidth = 1.5 * baseScale;
-    ctx.beginPath();
-    ctx.arc(0, 0, r - 1.5 * baseScale, 0, Math.PI * 2);
-    ctx.stroke();
+          ctx.beginPath();
+          ctx.moveTo(vertices[0].x, vertices[0].y);
+          for (let i = 1; i < vertices.length; i++) {
+            ctx.lineTo(vertices[i].x, vertices[i].y);
+          }
+          ctx.closePath();
 
-    // 이름 텍스트 (검은 퍽 위 → 밝은 색 + 검은 외곽선 유지)
-    const fontSize = r * 0.85;
-    ctx.font = `900 ${fontSize}px "Black Han Sans", "Noto Sans KR", sans-serif`;
-    ctx.textAlign = "center";
-    ctx.textBaseline = "middle";
+          // kinematic = 회전 막대, static = 고정 장애물
+          if (type === "kinematic") {
+            ctx.fillStyle = "#ea580c";
+            ctx.fill();
+            ctx.strokeStyle = "#9a3412";
+            ctx.lineWidth = lineScale * 1.5;
+            ctx.stroke();
+          } else {
+            ctx.fillStyle = "#1e293b";
+            ctx.fill();
+          }
+        } else if (shapeType === "circle") {
+          const circle = shape as planck.CircleShape;
+          const r = circle.getRadius();
+          ctx.beginPath();
+          ctx.arc(0, 0, r, 0, Math.PI * 2);
+          ctx.fillStyle = "#1e293b";
+          ctx.fill();
+        } else if (shapeType === "edge") {
+          const edge = shape as planck.EdgeShape;
+          const v1 = edge.m_vertex1;
+          const v2 = edge.m_vertex2;
+          ctx.beginPath();
+          ctx.moveTo(v1.x, v1.y);
+          ctx.lineTo(v2.x, v2.y);
+          ctx.strokeStyle = "#1e293b";
+          ctx.lineWidth = lineScale * 3;
+          ctx.stroke();
+        }
+      }
 
-    ctx.lineWidth = r * 0.32;
-    ctx.lineJoin = "round";
-    ctx.miterLimit = 2;
-    ctx.strokeStyle = "#000000";
-    ctx.strokeText(puck.puckMeta.name, 0, 1);
+      ctx.restore();
+    }
+  };
 
-    ctx.lineWidth = r * 0.16;
-    ctx.strokeText(puck.puckMeta.name, 0, 1);
+  const renderPucks = (
+    ctx: CanvasRenderingContext2D,
+    pucks: Puck[],
+    lineScale: number
+  ) => {
+    for (const puck of pucks) {
+      const pos = puck.body.getPosition();
+      const angle = puck.body.getAngle();
+      const r = PUCK.RADIUS;
 
-    ctx.fillStyle = puck.puckMeta.color;
-    ctx.fillText(puck.puckMeta.name, 0, 1);
+      ctx.save();
+      ctx.translate(pos.x, pos.y);
+      ctx.rotate(angle);
 
-    ctx.restore();
+      // 그림자
+      ctx.shadowColor = "rgba(0, 0, 0, 0.5)";
+      ctx.shadowBlur = lineScale * 8;
+      ctx.shadowOffsetY = lineScale * 3;
+
+      // 검은 퍽
+      const grad = ctx.createRadialGradient(-r * 0.3, -r * 0.3, r * 0.1, 0, 0, r);
+      grad.addColorStop(0, "#404040");
+      grad.addColorStop(0.5, "#1a1a1a");
+      grad.addColorStop(1, "#000000");
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(0, 0, r, 0, Math.PI * 2);
+      ctx.fill();
+
+      ctx.shadowColor = "transparent";
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetY = 0;
+
+      // 측면 두께감
+      ctx.strokeStyle = "rgba(255, 255, 255, 0.25)";
+      ctx.lineWidth = lineScale * 1.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, r - lineScale * 1, 0, Math.PI * 2);
+      ctx.stroke();
+
+      // 이름 (볼드 제거 - normal weight)
+      const fontSize = r * 1.5;
+      ctx.font = `normal ${fontSize}px "Pretendard", "Noto Sans KR", sans-serif`;
+      ctx.textAlign = "center";
+      ctx.textBaseline = "middle";
+
+      // 검은 외곽선 (두 번 그려 진하게)
+      ctx.lineJoin = "round";
+      ctx.miterLimit = 2;
+      ctx.strokeStyle = "#000000";
+      ctx.lineWidth = r * 0.35;
+      ctx.strokeText(puck.meta.name, 0, r * 0.05);
+      ctx.lineWidth = r * 0.18;
+      ctx.strokeText(puck.meta.name, 0, r * 0.05);
+
+      // 컬러 채움
+      ctx.fillStyle = puck.meta.color;
+      ctx.fillText(puck.meta.name, 0, r * 0.05);
+
+      ctx.restore();
+    }
   };
 
   const renderMinimap = () => {
     const canvas = minimapCanvasRef.current;
-    if (!canvas) return;
+    if (!canvas || !pwRef.current || !cameraRef.current) return;
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
     const dpr = window.devicePixelRatio || 1;
     const mapW = 80;
-    const mapH = (mapW * STAGE.HEIGHT) / STAGE.WIDTH;
+    // 맵 비율: 26m × 120m
+    const mapH = mapW * (120 / 26);
 
     canvas.width = mapW * dpr;
     canvas.height = mapH * dpr;
@@ -378,68 +360,47 @@ export default function GameCanvas({
     canvas.style.height = `${mapH}px`;
     ctx.scale(dpr, dpr);
 
-    // 흰 배경
+    // 배경
     ctx.fillStyle = "rgba(240, 249, 255, 0.95)";
     ctx.fillRect(0, 0, mapW, mapH);
-
-    // 경계
     ctx.strokeStyle = "#1e3a8a";
     ctx.lineWidth = 1;
     ctx.strokeRect(0.5, 0.5, mapW - 1, mapH - 1);
 
-    const sx = mapW / STAGE.WIDTH;
-    const sy = mapH / STAGE.HEIGHT;
+    // 좌표 변환: world (0~30, 0~120) → minimap pixels
+    const sx = mapW / 26;
+    const sy = mapH / 120;
+    const ox = -2 * sx; // x=2가 좌측 벽
 
     // 결승선
     ctx.strokeStyle = "#dc2626";
-    ctx.lineWidth = 1.2;
+    ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(0, GOAL_LINE_Y * sy);
-    ctx.lineTo(mapW, GOAL_LINE_Y * sy);
+    ctx.moveTo(0, STAGE.GOAL_Y * sy);
+    ctx.lineTo(mapW, STAGE.GOAL_Y * sy);
     ctx.stroke();
 
-    // 장애물 (코치 + 도트)
-    if (obstacleSetRef.current) {
-      obstacleSetRef.current.bodies.forEach((body) => {
-        if (body.label === "obstacle-coach") {
-          ctx.fillStyle = "rgba(220, 38, 38, 0.6)";
-          ctx.beginPath();
-          ctx.arc(body.position.x * sx, body.position.y * sy, 1.8, 0, Math.PI * 2);
-          ctx.fill();
-        } else if (body.label === "obstacle-funnel-dot") {
-          ctx.fillStyle = "rgba(30, 58, 138, 0.5)";
-          ctx.beginPath();
-          ctx.arc(body.position.x * sx, body.position.y * sy, 1.2, 0, Math.PI * 2);
-          ctx.fill();
-        }
-      });
-    }
-
-    // 퍽 (검은 점 + 컬러 테두리)
-    pucksRef.current.forEach((puck) => {
-      if (!puck.puckMeta) return;
+    // 퍽 위치
+    for (const puck of pwRef.current.pucks) {
+      const pos = puck.body.getPosition();
       ctx.fillStyle = "#000000";
-      ctx.strokeStyle = puck.puckMeta.color;
+      ctx.strokeStyle = puck.meta.color;
       ctx.lineWidth = 0.8;
       ctx.beginPath();
-      ctx.arc(puck.position.x * sx, puck.position.y * sy, 2.2, 0, Math.PI * 2);
+      ctx.arc(pos.x * sx + ox, pos.y * sy, 1.8, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
-    });
-
-    // 카메라 뷰포트 박스 (줌 고려)
-    if (cameraRef.current) {
-      const cam = cameraRef.current;
-      const visibleW = VIEWPORT.WIDTH / cam.zoom;
-      const visibleH = VIEWPORT.HEIGHT / cam.zoom;
-      const boxX = (cam.x - visibleW / 2) * sx;
-      const boxY = (cam.y - visibleH / 2) * sy;
-      const boxW = visibleW * sx;
-      const boxH = visibleH * sy;
-      ctx.strokeStyle = "#fbbf24";
-      ctx.lineWidth = 1.5;
-      ctx.strokeRect(boxX, boxY, boxW, boxH);
     }
+
+    // 카메라 뷰포트 박스
+    const cam = cameraRef.current;
+    const viewW = (VIEWPORT.WIDTH / (INITIAL_ZOOM * cam.zoom)) * sx;
+    const viewH = (VIEWPORT.HEIGHT / (INITIAL_ZOOM * cam.zoom)) * sy;
+    const bx = cam.x * sx + ox - viewW / 2;
+    const by = cam.y * sy - viewH / 2;
+    ctx.strokeStyle = "#fbbf24";
+    ctx.lineWidth = 1.5;
+    ctx.strokeRect(bx, by, viewW, viewH);
   };
 
   const teardown = () => {
@@ -447,16 +408,10 @@ export default function GameCanvas({
       cancelAnimationFrame(animationRef.current);
       animationRef.current = null;
     }
-    if (runnerRef.current) {
-      Matter.Runner.stop(runnerRef.current);
-      runnerRef.current = null;
+    if (pwRef.current) {
+      destroyWorld(pwRef.current);
+      pwRef.current = null;
     }
-    if (engineRef.current) {
-      cleanupEngine(engineRef.current);
-      engineRef.current = null;
-    }
-    pucksRef.current = [];
-    obstacleSetRef.current = null;
     cameraRef.current = null;
 
     const ctx = canvasRef.current?.getContext("2d");
@@ -486,7 +441,7 @@ export default function GameCanvas({
             <span className="text-3xl">🏒</span>
           </div>
           <p
-            className="text-2xl font-bold tracking-widest text-neon-cyan/80"
+            className="text-2xl tracking-widest text-neon-cyan/80"
             style={{ fontFamily: "Bebas Neue, sans-serif" }}
           >
             ICE RINK
@@ -502,10 +457,7 @@ export default function GameCanvas({
 
       {isPlaying && (
         <>
-          <canvas
-            ref={canvasRef}
-            className="rounded-lg shadow-2xl"
-          />
+          <canvas ref={canvasRef} className="rounded-lg shadow-2xl" />
 
           <div className="pointer-events-none absolute left-3 top-3 z-20 rounded-md border border-blue-900/50 bg-white/85 p-1 backdrop-blur">
             <canvas ref={minimapCanvasRef} className="block" />

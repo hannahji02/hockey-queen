@@ -1,69 +1,58 @@
 /**
- * 물리 시뮬레이션 상수
+ * 물리 상수 (planck.js / Box2D 단위계)
+ *
+ * 레퍼런스 좌표계 차용:
+ * - Stage Wheel of Fortune: 가로 약 26m, 세로 약 112m
+ * - 퍽 직경: 0.5m
+ * - 시작 위치: x=10.25, y=2
+ * - 결승선 y: 111
+ * - 줌인 시작 y: 106.75
  */
 
-// 캔버스 기준 크기 (실제는 비율 기반으로 동적 스케일)
-// 가로 720, 세로 2400 - 트랙이 매우 김
 export const STAGE = {
-  WIDTH: 720,
-  HEIGHT: 2400,
-  ASPECT_RATIO: 720 / 2400,
+  /** 좌측 보드 (벽) x */
+  LEFT: 2,
+  /** 우측 보드 (벽) x */
+  RIGHT: 24,
+  /** 상단 (스폰 영역 위) y */
+  TOP: -5,
+  /** 결승선 y */
+  GOAL_Y: 111,
+  /** 줌인 시작 y (이 이하로 내려오면 줌인) */
+  ZOOM_Y: 106.75,
 } as const;
 
-// 카메라 뷰포트 크기 (퍽 추적 시 보이는 영역)
-// 16:9 비율로 화면 가로 풀필을 가정한 뷰포트
+export const PUCK = {
+  /** 퍽 반지름 (m) */
+  RADIUS: 0.25,
+  /** 퍽 색상 가짓수 */
+  COLOR_COUNT: 12,
+} as const;
+
+/** 카메라 줌 임계 거리 (m) - 결승선까지 이 이하 거리면 줌인 */
+export const ZOOM_THRESHOLD = 4.25;
+
+/** 픽셀당 미터 (초기 줌 기준) */
+export const INITIAL_ZOOM = 12;
+
+/** 캔버스 크기 기준 (실제 표시는 컨테이너에 맞춰 스케일) */
 export const VIEWPORT = {
   WIDTH: 720,
-  HEIGHT: 405, // 16:9
+  HEIGHT: 405,
 } as const;
 
-// 퍽 크기/물리 속성
-export const PUCK = {
-  RADIUS: 26, // 카메라 줌 시 잘 보이도록 약간 키움
-  RESTITUTION: 0.55,
-  FRICTION: 0.005,
-  FRICTION_AIR: 0.012,
-  DENSITY: 0.002,
-} as const;
-
-// 시작 위치 (상단)
-export const SPAWN = {
-  TOP_Y: 80,
-  MARGIN_X: 70,
-  JITTER: 10,
-} as const;
-
-// 결승선 위치 (하단)
-export const GOAL_LINE_Y = STAGE.HEIGHT - 80;
-
-// 카메라 줌인 임계 거리 (결승선까지 남은 거리)
-// 이 거리 이하로 들어오면 줌인 + 슬로우모션 시작
-export const ZOOM_THRESHOLD = 700;
-export const MAX_ZOOM = 3;
-export const MIN_TIME_SCALE = 0.3;
-
-// 네온 컬러 팔레트 (퍽 이름 색상) - 흰 배경에서도 잘 보이도록 진한 색 위주
+/** 퍽 컬러 팔레트 (HSL hue 값으로 동적 생성하므로 사용 안 함 - 호환용) */
 export const NEON_COLORS = [
-  "#0891b2", // cyan-dark
-  "#c026d3", // magenta-dark
-  "#ca8a04", // yellow-dark
-  "#16a34a", // green-dark
-  "#dc2626", // red-dark
-  "#7c3aed", // violet-dark
-  "#ea580c", // orange-dark
-  "#0d9488", // teal-dark
-  "#db2777", // pink-dark
-  "#2563eb", // blue-dark
-  "#d97706", // amber-dark
-  "#0e7490", // teal-darker
+  "#0891b2",
+  "#c026d3",
+  "#ca8a04",
+  "#16a34a",
+  "#dc2626",
+  "#7c3aed",
+  "#ea580c",
+  "#0d9488",
+  "#db2777",
+  "#2563eb",
+  "#d97706",
+  "#0e7490",
 ] as const;
-
-/**
- * 인덱스 기반으로 균등하게 컬러 분배 (인접 인원끼리 비슷한 색 방지 목적으로 셔플)
- */
-export function pickColor(index: number): string {
-  const shuffled = [
-    0, 6, 1, 7, 2, 8, 3, 9, 4, 10, 5, 11,
-  ];
-  return NEON_COLORS[shuffled[index % shuffled.length]];
-}
