@@ -4,6 +4,7 @@ import { useEffect, useRef, useState } from "react";
 import Matter from "matter-js";
 import { createEngine, cleanupEngine } from "@/lib/physics/engine";
 import { createPucks, drawPuckLabels, type PuckBody } from "@/lib/physics/puck";
+import { createObstacles, type ObstacleSet } from "@/lib/physics/obstacles";
 import { STAGE, GOAL_LINE_Y } from "@/lib/physics/constants";
 
 export type GameState = "idle" | "shuffling" | "running" | "finished";
@@ -30,6 +31,7 @@ export default function GameCanvas({
   const runnerRef = useRef<Matter.Runner | null>(null);
   const renderRef = useRef<Matter.Render | null>(null);
   const pucksRef = useRef<PuckBody[]>([]);
+  const obstacleSetRef = useRef<ObstacleSet | null>(null);
   const animationRef = useRef<number | null>(null);
 
   const [scale, setScale] = useState(1);
@@ -83,6 +85,11 @@ export default function GameCanvas({
     pucksRef.current = pucks;
     Matter.Composite.add(engineSetup.world, pucks);
 
+    // 장애물 생성 및 추가
+    const obstacles = createObstacles();
+    obstacleSetRef.current = obstacles;
+    Matter.Composite.add(engineSetup.world, obstacles.bodies);
+
     const render = Matter.Render.create({
       canvas: bodyCanvasRef.current,
       engine: engineSetup.engine,
@@ -113,7 +120,18 @@ export default function GameCanvas({
       setTimeout(() => clearInterval(shakeInterval), 1100);
     }
 
+    // 라벨 + 장애물 움직임 업데이트 루프
+    const startTime = performance.now();
     const labelLoop = () => {
+      const now = performance.now();
+      const elapsed = now - startTime;
+
+      // 움직이는 장애물 업데이트 (스틱, 선수)
+      if (obstacleSetRef.current) {
+        obstacleSetRef.current.update(elapsed);
+      }
+
+      // 퍽 라벨 렌더링
       const ctx = labelCanvasRef.current?.getContext("2d");
       if (ctx) {
         ctx.clearRect(0, 0, STAGE.WIDTH, STAGE.HEIGHT);
@@ -142,6 +160,7 @@ export default function GameCanvas({
       engineRef.current = null;
     }
     pucksRef.current = [];
+    obstacleSetRef.current = null;
 
     const bodyCtx = bodyCanvasRef.current?.getContext("2d");
     if (bodyCtx) bodyCtx.clearRect(0, 0, STAGE.WIDTH, STAGE.HEIGHT);

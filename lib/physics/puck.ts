@@ -113,13 +113,26 @@ export function drawPuckLabels(
     ctx.shadowColor = color;
     ctx.shadowBlur = 8;
 
-    // 이름 텍스트
-    ctx.fillStyle = color;
+    // 이름 텍스트 폰트 설정
     ctx.font = `bold ${
       PUCK.RADIUS * 0.7 * scale
     }px "Black Han Sans", "Noto Sans KR", sans-serif`;
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
+
+    // 검은 외곽선 (가독성 향상)
+    ctx.lineWidth = PUCK.RADIUS * 0.12 * scale;
+    ctx.lineJoin = "round";
+    ctx.miterLimit = 2;
+    ctx.strokeStyle = "#000000";
+    ctx.shadowColor = "transparent";
+    ctx.shadowBlur = 0;
+    ctx.strokeText(name, 0, 1);
+
+    // 컬러 채움 + 글로우
+    ctx.shadowColor = color;
+    ctx.shadowBlur = 8;
+    ctx.fillStyle = color;
     ctx.fillText(name, 0, 1);
 
     ctx.restore();

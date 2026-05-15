@@ -19,7 +19,7 @@ export default function Header() {
       </div>
 
       <div className="flex items-center gap-4 text-xs text-gray-400">
-        <span>Phase 3 · Physics Active</span>
+        <span>Phase 4 · Obstacles Active</span>
         <div className="h-2 w-2 animate-pulse rounded-full bg-neon-green" />
       </div>
     </header>
