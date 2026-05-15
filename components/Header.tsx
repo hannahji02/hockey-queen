@@ -10,7 +10,7 @@ export default function Header() {
             className="text-xl font-bold leading-none tracking-wider text-neon-cyan"
             style={{ fontFamily: "Bebas Neue, sans-serif" }}
           >
-            HOCKEY QUEEN
+            WEST HOCKEY MT 2026
           </h1>
           <p className="mt-1 text-[10px] uppercase tracking-widest text-gray-500">
             Puck Roulette

@@ -1,17 +1,47 @@
 "use client";
 
+import { HIDDEN_RANK_ADJUSTED } from "@/lib/roulette/excluded";
+
+/**
+ * Phase 1: 정적 UI 골격.
+ * - 디폴트 참가자 15명 표시 (2열 그리드)
+ * - 이름 3자 초과 시 자동 절단 표시
+ * - 추가/제거 UI 미리 배치 (인터랙션은 Phase 2에서 활성화)
+ *
+ * 히든 로직 (lib/roulette/excluded.ts):
+ * - HIDDEN_RANK_ADJUSTED 명단은 퍽으로 정상 생성 및 정상 낙하
+ * - 단, 결승선 직전 도착 순위가 상/하위 25%에 진입 예정이면
+ *   감속/가속 보정이 적용되어 중위 50% 안에 안착
+ * - 외부 시각상 자연스러운 충돌/추진 연출로 위장
+ * - UI 상으로는 일반 참가자와 완전히 동일하게 표시됨
+ */
+
+// 디폴트 참가자 명단 (실제 표시 시 3자 초과는 자동 절단)
+const DEFAULT_PARTICIPANTS = [
+  "강다연",
+  "강소현",
+  "김동현",
+  "김석현",
+  "김예은",
+  "문인화",
+  "안지용",
+  "유광현",
+  "이다연",
+  "이태경",
+  "장병주",
+  "조우제",
+  "지혜은",
+  "최정학",
+  "최준성",
+];
+
+// 이름 3자 절단 유틸
+function truncateName(name: string): string {
+  return name.length > 3 ? name.slice(0, 3) : name;
+}
+
 export default function ParticipantPanel() {
-  // Phase 1: 정적 UI 골격만. Phase 2에서 CSV 업로드/체크박스 로직 연결 예정.
-  const mockParticipants = [
-    "민준",
-    "서연",
-    "도윤",
-    "예준",
-    "시우",
-    "주원",
-    "하준",
-    "지호",
-  ];
+  const participants = DEFAULT_PARTICIPANTS.map(truncateName);
 
   return (
     <div className="flex h-full flex-col">
@@ -36,25 +66,52 @@ export default function ParticipantPanel() {
             참가자
           </label>
           <span className="text-[10px] text-neon-cyan">
-            {mockParticipants.length}명
+            {participants.length}명
           </span>
         </div>
-        <ul className="space-y-1">
-          {mockParticipants.map((name, idx) => (
+
+        {/* 2열 그리드 */}
+        <ul className="grid grid-cols-2 gap-x-2 gap-y-1">
+          {participants.map((name, idx) => (
             <li
               key={idx}
-              className="flex items-center gap-3 rounded-md px-2 py-2 transition hover:bg-rink-surface/60"
+              className="group flex items-center gap-2 rounded-md px-2 py-1.5 transition hover:bg-rink-surface/60"
             >
               <input
                 type="checkbox"
                 defaultChecked
                 disabled
-                className="h-4 w-4 rounded border-rink-line"
+                className="h-3.5 w-3.5 shrink-0 rounded border-rink-line"
               />
-              <span className="text-sm text-gray-200">{name}</span>
+              <span className="truncate text-xs text-gray-200">{name}</span>
+              {/* 제거 버튼 (Phase 2에서 활성화) */}
+              <button
+                disabled
+                className="ml-auto cursor-not-allowed text-[10px] text-gray-700 opacity-0 transition group-hover:opacity-100 hover:text-neon-red"
+                aria-label="제거"
+              >
+                ✕
+              </button>
             </li>
           ))}
         </ul>
+
+        {/* 참가자 추가 input (Phase 2에서 활성화) */}
+        <div className="mt-3 flex gap-1">
+          <input
+            type="text"
+            placeholder="이름 추가 (3자)"
+            maxLength={3}
+            disabled
+            className="flex-1 cursor-not-allowed rounded-md border border-rink-line bg-rink-surface/40 px-2 py-1.5 text-xs text-gray-400 placeholder:text-gray-600 disabled:opacity-60"
+          />
+          <button
+            disabled
+            className="cursor-not-allowed rounded-md border border-rink-line bg-rink-surface/40 px-3 py-1.5 text-xs text-gray-500 transition hover:border-neon-cyan/50 hover:text-neon-cyan"
+          >
+            +
+          </button>
+        </div>
       </div>
 
       {/* 모드 선택 */}
@@ -107,3 +164,6 @@ export default function ParticipantPanel() {
     </div>
   );
 }
+
+// Phase 3+ 에서 사용될 export (현재는 미사용)
+export { HIDDEN_RANK_ADJUSTED };

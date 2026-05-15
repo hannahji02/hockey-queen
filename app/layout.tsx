@@ -2,8 +2,8 @@ import type { Metadata } from "next";
 import "./globals.css";
 
 export const metadata: Metadata = {
-  title: "Hockey Queen - 핀볼 룰렛",
-  description: "아이스하키 동호회 워크샵 추첨 룰렛",
+  title: "WEST HOCKEY MT 2026",
+  description: "WEST HOCKEY 워크샵 추첨 룰렛",
 };
 
 export default function RootLayout({

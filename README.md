@@ -1,6 +1,6 @@
-# 🏒 Hockey Queen
+# 🏒 WEST HOCKEY MT 2026
 
-아이스하키 동호회 워크샵 추첨 룰렛 웹앱
+WEST HOCKEY 워크샵 추첨 룰렛 웹앱
 
 ## Phase 1: UI Skeleton (현재 단계)
 
